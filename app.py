@@ -3,14 +3,15 @@ from pymongo import MongoClient
 from datetime import datetime
 import os
 import logging
+import json
 
 app = Flask(__name__)
 
-# Configure logging
+# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# MongoDB Connection
+# MongoDB connection (local or Atlas)
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/github_events")
 client = MongoClient(MONGO_URI)
 db = client.get_database()
@@ -19,67 +20,72 @@ events = db.events
 @app.route('/webhook', methods=['POST'])
 def handle_webhook():
     try:
-        # Verify content type
-        if request.content_type != 'application/json':
-            logger.error(f"Invalid content type: {request.content_type}")
+        # 1. Check if request is JSON
+        if not request.is_json:
+            logger.error("⚠️ Not a JSON request")
             return jsonify({"error": "Content-Type must be application/json"}), 400
 
-        data = request.get_json()
-        if not data:
-            logger.error("No JSON data received")
-            return jsonify({"error": "No JSON data received"}), 400
-
-        # Get GitHub event type from headers
+        # 2. Get GitHub event type (push, pull_request, etc.)
         event_type = request.headers.get('X-GitHub-Event')
-        logger.info(f"Received GitHub event: {event_type}")
+        if not event_type:
+            logger.error("❌ Missing X-GitHub-Event header")
+            return jsonify({"error": "Missing GitHub event type"}), 400
 
-        # Process different event types
+        data = request.get_json()
+        logger.info(f"📦 Received {event_type} event:\n{json.dumps(data, indent=2)}")
+
+        # 3. Process event based on type
+        event = None
+
+        # Push event
         if event_type == 'push':
-            # Push event
             event = {
-                "request_id": data.get('after'),
-                "author": data.get('pusher', {}).get('name'),
+                "request_id": data.get('after', 'N/A'),
+                "author": data.get('pusher', {}).get('name', 'unknown'),
                 "action": "PUSH",
-                "from_branch": data.get('ref', '').split('/')[-1],
-                "to_branch": data.get('ref', '').split('/')[-1],
+                "from_branch": data.get('ref', 'refs/heads/main').split('/')[-1],
+                "to_branch": data.get('ref', 'refs/heads/main').split('/')[-1],
                 "timestamp": datetime.utcnow().isoformat()
             }
+
+        # Pull Request or Merge event
         elif event_type == 'pull_request':
-            # Pull Request event
-            pr_data = data.get('pull_request', {})
-            if data.get('action') == 'closed' and pr_data.get('merged'):
+            pr = data.get('pull_request', {})
+            if data.get('action') == 'closed' and pr.get('merged'):
                 # Merge event
                 event = {
-                    "request_id": str(pr_data.get('number')),
-                    "author": pr_data.get('merged_by', {}).get('login'),
+                    "request_id": str(pr.get('number', 'N/A')),
+                    "author": pr.get('merged_by', {}).get('login', 'unknown'),
                     "action": "MERGE",
-                    "from_branch": pr_data.get('head', {}).get('ref'),
-                    "to_branch": pr_data.get('base', {}).get('ref'),
+                    "from_branch": pr.get('head', {}).get('ref', 'unknown'),
+                    "to_branch": pr.get('base', {}).get('ref', 'unknown'),
                     "timestamp": datetime.utcnow().isoformat()
                 }
             else:
-                # Regular PR event
+                # Pull Request event
                 event = {
-                    "request_id": str(pr_data.get('number')),
-                    "author": pr_data.get('user', {}).get('login'),
+                    "request_id": str(pr.get('number', 'N/A')),
+                    "author": pr.get('user', {}).get('login', 'unknown'),
                     "action": "PULL_REQUEST",
-                    "from_branch": pr_data.get('head', {}).get('ref'),
-                    "to_branch": pr_data.get('base', {}).get('ref'),
+                    "from_branch": pr.get('head', {}).get('ref', 'unknown'),
+                    "to_branch": pr.get('base', {}).get('ref', 'unknown'),
                     "timestamp": datetime.utcnow().isoformat()
                 }
-        else:
-            logger.warning(f"Unsupported event type: {event_type}")
-            return jsonify({"error": f"Unsupported event type: {event_type}"}), 400
 
-        # Insert into MongoDB
-        result = events.insert_one(event)
-        logger.info(f"Inserted event with ID: {result.inserted_id}")
+        # Unsupported event
+        if not event:
+            logger.error(f"❌ Unsupported event: {event_type}")
+            return jsonify({"error": f"Unsupported event: {event_type}"}), 400
 
-        return jsonify({"status": "success", "event_id": str(result.inserted_id)}), 200
+        # 4. Save to MongoDB
+        events.insert_one(event)
+        logger.info("✅ Event saved to MongoDB")
+
+        return jsonify({"status": "success"}), 200
 
     except Exception as e:
-        logger.error(f"Error processing webhook: {str(e)}", exc_info=True)
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        logger.error(f"🔥 Webhook failed: {str(e)}", exc_info=True)
+        return jsonify({"error": "Server error"}), 500
 
 @app.route('/api/events', methods=['GET'])
 def get_events():
@@ -89,7 +95,7 @@ def get_events():
             event["_id"] = str(event["_id"])
         return jsonify(latest_events)
     except Exception as e:
-        logger.error(f"Error fetching events: {str(e)}")
+        logger.error(f"❌ Failed to fetch events: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/')
