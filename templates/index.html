@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GitHub Events</title>
+    <style>
+        body { font-family: Arial; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .event { margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+        .timestamp { color: #666; font-size: 0.8em; }
+    </style>
+</head>
+<body>
+    <h1>Latest GitHub Events</h1>
+    <div id="events"></div>
+
+    <script>
+        function formatEvent(event) {
+            const date = new Date(event.timestamp);
+            const formattedDate = date.toLocaleString();
+
+            if (event.action === "PUSH") {
+                return `${event.author} pushed to ${event.to_branch} on ${formattedDate}`;
+            } else if (event.action === "PULL_REQUEST") {
+                return `${event.author} submitted a pull request from ${event.from_branch} to ${event.to_branch} on ${formattedDate}`;
+            } else if (event.action === "MERGE") {
+                return `${event.author} merged branch ${event.from_branch} to ${event.to_branch} on ${formattedDate}`;
+            }
+        }
+
+        function fetchEvents() {
+            fetch('/api/events')
+                .then(response => response.json())
+                .then(data => {
+                    const eventsContainer = document.getElementById('events');
+                    eventsContainer.innerHTML = '';
+                    data.forEach(event => {
+                        const div = document.createElement('div');
+                        div.className = 'event';
+                        div.textContent = formatEvent(event);
+                        eventsContainer.appendChild(div);
+                    });
+                });
+        }
+
+        // Fetch events every 15 seconds
+        fetchEvents();
+        setInterval(fetchEvents, 15000);
+    </script>
+</body>
+</html>
