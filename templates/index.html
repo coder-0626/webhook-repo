@@ -76,17 +76,50 @@
         }
 
         function loadEvents() {
-            fetch('/api/events')
-                .then(response => response.json())
-                .then(data => {
-                    const container = document.getElementById('events-container');
-                    container.innerHTML = '';
-                    data.forEach(event => {
-                        container.innerHTML += formatEvent(event);
-                    });
-                })
-                .catch(error => console.error('Error:', error));
-        }
+    fetch('/api/events')
+        .then(response => {
+            if (!response.ok) throw new Error('Network error');
+            return response.json();
+        })
+        .then(data => {
+            if (!Array.isArray(data)) {
+                throw new Error('Invalid data format');
+            }
+            
+            const container = document.getElementById('events-container');
+            container.innerHTML = ''; // Clear existing
+            
+            data.forEach(event => {
+                const eventElement = document.createElement('div');
+                eventElement.innerHTML = formatEvent(event);
+                container.appendChild(eventElement);
+            });
+        })
+        .catch(error => {
+            console.error('Failed to load events:', error);
+            // Optional: Show error to user
+            document.getElementById('events-container').innerHTML = 
+                '<div class="error">Failed to load events. Check console.</div>';
+        });
+}
+
+// Format timestamp properly
+function formatDate(timestamp) {
+    try {
+        const date = new Date(timestamp);
+        return date.toLocaleString('en-US', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZoneName: 'short'
+        });
+    } catch (e) {
+        console.warn('Invalid timestamp:', timestamp);
+        return timestamp; // Fallback to raw value
+    }
+}
 
         // Initial load and refresh every 15 seconds
         loadEvents();
