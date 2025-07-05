@@ -1,129 +1,188 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GitHub Activity Monitor</title>
     <style>
+        :root {
+            --push-color: #28a745;
+            --pr-color: #007bff;
+            --merge-color: #6f42c1;
+            --error-color: #dc3545;
+        }
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             max-width: 800px;
             margin: 0 auto;
             padding: 20px;
-        }
-        .event {
-            margin: 15px 0;
-            padding: 15px;
-            border-radius: 5px;
-            background: #f8f9fa;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .push { border-left: 4px solid #28a745; }
-        .pr { border-left: 4px solid #007bff; }
-        .merge { border-left: 4px solid #6f42c1; }
-        .timestamp {
-            color: #6c757d;
-            font-size: 0.9em;
-            margin-top: 5px;
+            background-color: #f8f9fa;
         }
         h1 {
             color: #24292e;
-            border-bottom: 1px solid #e1e4e8;
+            border-bottom: 2px solid #e1e4e8;
             padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        #events-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .event {
+            padding: 15px;
+            border-radius: 6px;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border-left: 4px solid;
+            transition: transform 0.2s;
+        }
+        .event:hover {
+            transform: translateX(5px);
+        }
+        .push {
+            border-left-color: var(--push-color);
+        }
+        .pull-request {
+            border-left-color: var(--pr-color);
+        }
+        .merge {
+            border-left-color: var(--merge-color);
+        }
+        .event-action {
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+        .timestamp {
+            color: #6c757d;
+            font-size: 0.85em;
+            font-family: monospace;
+        }
+        .debug-info {
+            margin-top: 30px;
+            padding: 15px;
+            background: #f1f1f1;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        #last-updated {
+            text-align: right;
+            font-size: 0.8em;
+            color: #6c757d;
+            margin-bottom: 10px;
         }
     </style>
 </head>
 <body>
     <h1>GitHub Activity Feed</h1>
+    <div id="last-updated">Last checked: <span id="update-time">Never</span></div>
     <div id="events-container">
         <!-- Events will be loaded here -->
+        <div class="event placeholder">Loading events...</div>
+    </div>
+
+    <div class="debug-info">
+        <h3>Debug Information</h3>
+        <div>Connection status: <span id="connection-status">OK</span></div>
+        <div>Last API call: <span id="last-api-call">-</span></div>
+        <div>Event count: <span id="event-count">0</span></div>
+        <button onclick="loadEvents(true)">Force Refresh</button>
     </div>
 
     <script>
-        function formatEvent(event) {
-            const date = new Date(event.timestamp);
-            const options = { 
-                day: 'numeric', 
-                month: 'long', 
-                year: 'numeric', 
-                hour: '2-digit', 
+        // Configuration
+        const POLL_INTERVAL = 15000; // 15 seconds
+        let lastUpdateTimestamp = null;
+        
+        // Format date for display
+        function formatDate(timestamp) {
+            if (!timestamp) return 'Unknown';
+            const date = new Date(timestamp);
+            return date.toLocaleString('en-US', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
                 minute: '2-digit',
-                timeZoneName: 'short'
-            };
-            const formattedDate = date.toLocaleString('en-US', options);
+                second: '2-digit'
+            });
+        }
 
-            let actionText = '';
+        // Format event action text
+        function formatAction(event) {
             switch(event.action) {
                 case 'PUSH':
-                    actionText = `${event.author} pushed to ${event.to_branch}`;
-                    return `<div class="event push">
-                                <div>${actionText}</div>
-                                <div class="timestamp">${formattedDate}</div>
-                            </div>`;
+                    return `${event.author} pushed to ${event.to_branch}`;
                 case 'PULL_REQUEST':
-                    actionText = `${event.author} submitted a pull request from ${event.from_branch} to ${event.to_branch}`;
-                    return `<div class="event pr">
-                                <div>${actionText}</div>
-                                <div class="timestamp">${formattedDate}</div>
-                            </div>`;
+                    return `${event.author} submitted PR from ${event.from_branch} to ${event.to_branch}`;
                 case 'MERGE':
-                    actionText = `${event.author} merged branch ${event.from_branch} to ${event.to_branch}`;
-                    return `<div class="event merge">
-                                <div>${actionText}</div>
-                                <div class="timestamp">${formattedDate}</div>
-                            </div>`;
+                    return `${event.author} merged ${event.from_branch} to ${event.to_branch}`;
                 default:
-                    return '';
+                    return `Unknown action: ${event.action}`;
             }
         }
 
-        function loadEvents() {
-    fetch('/api/events')
-        .then(response => {
-            if (!response.ok) throw new Error('Network error');
-            return response.json();
-        })
-        .then(data => {
-            if (!Array.isArray(data)) {
-                throw new Error('Invalid data format');
+        // Get CSS class for event type
+        function getEventClass(action) {
+            return action.toLowerCase().replace('_', '-');
+        }
+
+        // Main function to load events
+        async function loadEvents(force = false) {
+            try {
+                document.getElementById('connection-status').textContent = 'Fetching...';
+                document.getElementById('last-api-call').textContent = formatDate(new Date());
+                
+                const response = await fetch('/api/events');
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                const data = await response.json();
+                if (!Array.isArray(data)) throw new Error('Invalid data format');
+                
+                document.getElementById('event-count').textContent = data.length;
+                
+                // Only update if we have new data
+                const newestEvent = data[0];
+                if (!force && newestEvent && lastUpdateTimestamp && 
+                    new Date(newestEvent.timestamp) <= new Date(lastUpdateTimestamp)) {
+                    document.getElementById('connection-status').textContent = 'OK (no new events)';
+                    return;
+                }
+                
+                if (data.length > 0) {
+                    lastUpdateTimestamp = data[0].timestamp;
+                    document.getElementById('update-time').textContent = formatDate(new Date());
+                }
+                
+                const container = document.getElementById('events-container');
+                if (data.length === 0) {
+                    container.innerHTML = '<div class="event">No events found</div>';
+                } else {
+                    container.innerHTML = data.map(event => `
+                        <div class="event ${getEventClass(event.action)}">
+                            <div class="event-action">${formatAction(event)}</div>
+                            <div class="timestamp">${formatDate(event.timestamp)}</div>
+                        </div>
+                    `).join('');
+                }
+                
+                document.getElementById('connection-status').textContent = 'OK';
+            } catch (error) {
+                console.error('Error loading events:', error);
+                document.getElementById('connection-status').textContent = 'Error: ' + error.message;
+                document.getElementById('events-container').innerHTML = `
+                    <div class="event error">
+                        Error loading events. Check console for details.
+                    </div>
+                `;
             }
-            
-            const container = document.getElementById('events-container');
-            container.innerHTML = ''; // Clear existing
-            
-            data.forEach(event => {
-                const eventElement = document.createElement('div');
-                eventElement.innerHTML = formatEvent(event);
-                container.appendChild(eventElement);
-            });
-        })
-        .catch(error => {
-            console.error('Failed to load events:', error);
-            // Optional: Show error to user
-            document.getElementById('events-container').innerHTML = 
-                '<div class="error">Failed to load events. Check console.</div>';
-        });
-}
+        }
 
-// Format timestamp properly
-function formatDate(timestamp) {
-    try {
-        const date = new Date(timestamp);
-        return date.toLocaleString('en-US', {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            timeZoneName: 'short'
+        // Initial setup
+        document.addEventListener('DOMContentLoaded', () => {
+            loadEvents();
+            setInterval(loadEvents, POLL_INTERVAL);
         });
-    } catch (e) {
-        console.warn('Invalid timestamp:', timestamp);
-        return timestamp; // Fallback to raw value
-    }
-}
-
-        // Initial load and refresh every 15 seconds
-        loadEvents();
-        setInterval(loadEvents, 15000);
     </script>
 </body>
 </html>
