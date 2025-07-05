@@ -1,49 +1,96 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>GitHub Events</title>
+    <title>GitHub Activity Monitor</title>
     <style>
-        body { font-family: Arial; max-width: 800px; margin: 0 auto; padding: 20px; }
-        .event { margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
-        .timestamp { color: #666; font-size: 0.8em; }
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .event {
+            margin: 15px 0;
+            padding: 15px;
+            border-radius: 5px;
+            background: #f8f9fa;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .push { border-left: 4px solid #28a745; }
+        .pr { border-left: 4px solid #007bff; }
+        .merge { border-left: 4px solid #6f42c1; }
+        .timestamp {
+            color: #6c757d;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+        h1 {
+            color: #24292e;
+            border-bottom: 1px solid #e1e4e8;
+            padding-bottom: 10px;
+        }
     </style>
 </head>
 <body>
-    <h1>Latest GitHub Events</h1>
-    <div id="events"></div>
+    <h1>GitHub Activity Feed</h1>
+    <div id="events-container">
+        <!-- Events will be loaded here -->
+    </div>
 
     <script>
         function formatEvent(event) {
             const date = new Date(event.timestamp);
-            const formattedDate = date.toLocaleString();
+            const options = { 
+                day: 'numeric', 
+                month: 'long', 
+                year: 'numeric', 
+                hour: '2-digit', 
+                minute: '2-digit',
+                timeZoneName: 'short'
+            };
+            const formattedDate = date.toLocaleString('en-US', options);
 
-            if (event.action === "PUSH") {
-                return `${event.author} pushed to ${event.to_branch} on ${formattedDate}`;
-            } else if (event.action === "PULL_REQUEST") {
-                return `${event.author} submitted a pull request from ${event.from_branch} to ${event.to_branch} on ${formattedDate}`;
-            } else if (event.action === "MERGE") {
-                return `${event.author} merged branch ${event.from_branch} to ${event.to_branch} on ${formattedDate}`;
+            let actionText = '';
+            switch(event.action) {
+                case 'PUSH':
+                    actionText = `${event.author} pushed to ${event.to_branch}`;
+                    return `<div class="event push">
+                                <div>${actionText}</div>
+                                <div class="timestamp">${formattedDate}</div>
+                            </div>`;
+                case 'PULL_REQUEST':
+                    actionText = `${event.author} submitted a pull request from ${event.from_branch} to ${event.to_branch}`;
+                    return `<div class="event pr">
+                                <div>${actionText}</div>
+                                <div class="timestamp">${formattedDate}</div>
+                            </div>`;
+                case 'MERGE':
+                    actionText = `${event.author} merged branch ${event.from_branch} to ${event.to_branch}`;
+                    return `<div class="event merge">
+                                <div>${actionText}</div>
+                                <div class="timestamp">${formattedDate}</div>
+                            </div>`;
+                default:
+                    return '';
             }
         }
 
-        function fetchEvents() {
+        function loadEvents() {
             fetch('/api/events')
                 .then(response => response.json())
                 .then(data => {
-                    const eventsContainer = document.getElementById('events');
-                    eventsContainer.innerHTML = '';
+                    const container = document.getElementById('events-container');
+                    container.innerHTML = '';
                     data.forEach(event => {
-                        const div = document.createElement('div');
-                        div.className = 'event';
-                        div.textContent = formatEvent(event);
-                        eventsContainer.appendChild(div);
+                        container.innerHTML += formatEvent(event);
                     });
-                });
+                })
+                .catch(error => console.error('Error:', error));
         }
 
-        // Fetch events every 15 seconds
-        fetchEvents();
-        setInterval(fetchEvents, 15000);
+        // Initial load and refresh every 15 seconds
+        loadEvents();
+        setInterval(loadEvents, 15000);
     </script>
 </body>
 </html>
